@@ -5,9 +5,12 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { prompt } = req.body || {};
-  if (!prompt) return res.status(400).json({ error: "No prompt provided" });
+  const { intent, engine } = req.body || {};
+  if (!intent || !intent.music_prompt) {
+    return res.status(400).json({ error: "No intent provided" });
+  }
 
+  const prompt = intent.music_prompt;
   const HF_KEY = "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";
 
   let lastError = "";
@@ -21,9 +24,10 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({ inputs: prompt }),
       });
+
       if (hfRes.status === 503 || hfRes.status === 504) {
-        const body = await hfRes.json().catch(() => ({}));
-        await new Promise((r) => setTimeout(r, Math.min((body.estimated_time || 20) * 1000, 45000)));
+        const b = await hfRes.json().catch(() => ({}));
+        await new Promise((r) => setTimeout(r, Math.min((b.estimated_time || 20) * 1000, 45000)));
         lastError = `Model loading (attempt ${attempt + 1})`;
         continue;
       }
@@ -38,15 +42,19 @@ export default async function handler(req, res) {
         await new Promise((r) => setTimeout(r, 4000));
         continue;
       }
+
       const audioBuffer = await hfRes.arrayBuffer();
       if (audioBuffer.byteLength < 500) {
         lastError = "Empty audio returned";
         await new Promise((r) => setTimeout(r, 4000));
         continue;
       }
-      res.setHeader("Content-Type", "audio/flac");
-      res.setHeader("Content-Length", audioBuffer.byteLength);
-      return res.status(200).send(Buffer.from(audioBuffer));
+
+      // Convert to base64 and return as JSON (matches what App.jsx expects)
+      const base64 = Buffer.from(audioBuffer).toString("base64");
+      const audioUrl = `data:audio/flac;base64,${base64}`;
+      return res.status(200).json({ audioUrl });
+
     } catch (e) {
       lastError = e.message;
       await new Promise((r) => setTimeout(r, 4000));
