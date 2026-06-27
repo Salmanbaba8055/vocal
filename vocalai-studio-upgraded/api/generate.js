@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   }
 
   const prompt = intent.music_prompt;
-  const HF_KEY = "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";
+  const HF_KEY = "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";
 
   let lastError = "";
   for (let attempt = 0; attempt < 6; attempt++) {
