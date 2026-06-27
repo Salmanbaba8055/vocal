@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer';
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -9,22 +11,20 @@ export default async function handler(req, res) {
   if (!intent || !intent.music_prompt) return res.status(400).json({ error: "No intent provided" });
 
   const TOKEN = apiKey || process.env.REPLICATE_API_TOKEN;
-  if (!TOKEN) return res.status(400).json({ error: "No API token provided" });
+  if (!TOKEN) return res.status(400).json({ error: "No Replicate API token provided" });
+
+  const prompt = `Authentic South Indian Telangana folk music, ${intent.mood} mood, featuring powerful dappu frame drum rhythm and dholak beats, bright harmonium melody, rhythmic hand clapping, ${intent.intensity === 'full' ? 'very loud powerful festival percussion, high energy full band sound' : intent.intensity === 'subtle' ? 'soft gentle melodic background' : 'warm balanced folk accompaniment'}, ${intent.bpm || 130} BPM, Bonalu festival celebration style, Telangana devotional folk song, cinematic professional recording quality, ${intent.instruments?.join(', ')}`;
 
   try {
-    // Step 1 — create prediction using correct endpoint
     const createRes = await fetch("https://api.replicate.com/v1/predictions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json"
-      },
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        version: "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb",
+        version: "b05b1dff1d8c6dc63d14b0cdb42135378dcb87f6373b0d3d341ede46e59e2b38",
         input: {
-          prompt: intent.music_prompt,
-          model_version: "stereo-large",
-          duration: 8,
+          prompt: prompt,
+          model_version: "stereo-melody-large",
+          duration: 15,
           temperature: 1,
           top_k: 250,
           top_p: 0,
@@ -35,33 +35,30 @@ export default async function handler(req, res) {
       })
     });
 
-    if (createRes.status === 401) return res.status(401).json({ error: "Invalid Replicate API token." });
+    if (createRes.status === 401 || createRes.status === 403) {
+      return res.status(401).json({ error: "Invalid Replicate token. Check replicate.com → Account → API Tokens." });
+    }
     if (!createRes.ok) {
-      const err = await createRes.json().catch(() => ({}));
-      return res.status(500).json({ error: err.detail || `Replicate error ${createRes.status}` });
+      const e = await createRes.json().catch(() => ({}));
+      return res.status(500).json({ error: e.detail || `Replicate error ${createRes.status}` });
     }
 
     let prediction = await createRes.json();
     let attempts = 0;
 
-    // Step 2 — poll until done
-    while (prediction.status !== "succeeded" && prediction.status !== "failed" && attempts < 40) {
+    while (prediction.status !== "succeeded" && prediction.status !== "failed" && prediction.status !== "canceled" && attempts < 40) {
       await new Promise(r => setTimeout(r, 3000));
-      const pollRes = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
+      const poll = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
         headers: { Authorization: `Bearer ${TOKEN}` }
       });
-      prediction = await pollRes.json();
+      prediction = await poll.json();
       attempts++;
     }
 
-    if (prediction.status === "failed") {
-      return res.status(500).json({ error: "Generation failed: " + (prediction.error || "unknown") });
-    }
-    if (!prediction.output) {
-      return res.status(500).json({ error: "No audio output returned" });
+    if (prediction.status !== "succeeded" || !prediction.output) {
+      return res.status(500).json({ error: "Generation failed: " + (prediction.error || "no output returned") });
     }
 
-    // Step 3 — fetch audio and return as base64
     const audioRes = await fetch(prediction.output);
     const audioBuffer = await audioRes.arrayBuffer();
     const base64 = Buffer.from(audioBuffer).toString("base64");
