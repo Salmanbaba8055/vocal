@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/generate.js": {
-      "maxDuration": 90
+      "maxDuration": 120
     }
   }
 }
