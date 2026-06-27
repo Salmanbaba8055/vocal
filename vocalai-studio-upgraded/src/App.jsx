@@ -46,19 +46,33 @@ const S = {
   input: { width: '100%', background: '#181827', color: '#fff', border: '1px solid rgba(255,255,255,.12)', borderRadius: 12, padding: '12px 14px', outline: 0, boxSizing: 'border-box', fontSize: 14 },
 };
 
-function KeyModal({ hfKey, onSave, onClose }) {
-  const [val, setVal] = useState(hfKey || '');
+function KeyModal({ apiKey, onSave, onClose }) {
+  const [val, setVal] = useState(apiKey || '');
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={onClose}>
       <div style={{ ...S.card, width: '100%', maxWidth: 420 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ margin: 0 }}>HuggingFace API Key</h3>
+          <h3 style={{ margin: 0 }}>🔑 Replicate API Token</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}><X size={18} /></button>
         </div>
-        <p style={{ fontSize: 13, color: 'rgba(255,255,255,.5)', marginBottom: 6 }}>Get free key at <strong style={{ color: '#a78bfa' }}>huggingface.co</strong> → Settings → Access Tokens</p>
-        <p style={{ fontSize: 13, color: '#fbbf24', marginBottom: 14 }}>⚠️ Enable "Make calls to the Inference API" when creating token</p>
-        <input type="password" value={val} onChange={e => setVal(e.target.value)} placeholder="hf_xxxxxxxxxxxxxxxxxxxx" style={{ ...S.input, marginBottom: 12 }} onKeyDown={e => e.key === 'Enter' && val.trim() && onSave(val.trim())} autoFocus />
-        <button onClick={() => val.trim() && onSave(val.trim())} style={{ ...S.btn('linear-gradient(135deg,#7c3aed,#6d28d9)') }}>Save & Continue</button>
+        <p style={{ fontSize: 13, color: 'rgba(255,255,255,.5)', marginBottom: 6 }}>
+          Get your token at <strong style={{ color: '#a78bfa' }}>replicate.com</strong> → Account → API Tokens
+        </p>
+        <p style={{ fontSize: 13, color: '#fbbf24', marginBottom: 14 }}>
+          💳 Add billing at replicate.com → Billing (~$0.01 per song)
+        </p>
+        <input
+          type="password"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          placeholder="r8_xxxxxxxxxxxxxxxxxxxx"
+          style={{ ...S.input, marginBottom: 12 }}
+          onKeyDown={e => e.key === 'Enter' && val.trim() && onSave(val.trim())}
+          autoFocus
+        />
+        <button onClick={() => val.trim() && onSave(val.trim())} style={{ ...S.btn('linear-gradient(135deg,#7c3aed,#6d28d9)') }}>
+          Save & Continue
+        </button>
       </div>
     </div>
   );
@@ -188,7 +202,7 @@ function Toast({ text, clear }) {
 
 export default function App() {
   const [screen, setScreen] = useState('landing');
-  const [hfKey, setHfKey] = useState(() => { try { return localStorage.getItem('hf_key') || ''; } catch { return ''; } });
+  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem('replicate_key') || ''; } catch { return ''; } });
   const [showKey, setShowKey] = useState(false);
   const [vocalFile, setVocalFile] = useState(null);
   const [vocalUrl, setVocalUrl] = useState(null);
@@ -205,7 +219,7 @@ export default function App() {
   const fileRef = useRef(null);
   const audioRef = useRef(null);
 
-  const saveKey = (key) => { setHfKey(key); setShowKey(false); try { localStorage.setItem('hf_key', key); } catch {} };
+  const saveKey = (key) => { setApiKey(key); setShowKey(false); try { localStorage.setItem('replicate_key', key); } catch {} };
 
   const handleUpload = async (file) => {
     if (!file) return;
@@ -227,7 +241,8 @@ export default function App() {
       const dur = Math.max(vBuf.duration, mBuf.duration);
       const offline = new OfflineAudioContext(2, Math.ceil(dur * 44100), 44100);
       const comp = offline.createDynamicsCompressor();
-      comp.threshold.value = -18; comp.knee.value = 18; comp.ratio.value = 3; comp.attack.value = 0.003; comp.release.value = 0.25;
+      comp.threshold.value = -18; comp.knee.value = 18; comp.ratio.value = 3;
+      comp.attack.value = 0.003; comp.release.value = 0.25;
       comp.connect(offline.destination);
       [[vBuf, vv], [mBuf, mv]].forEach(([buf, gain]) => {
         const src = offline.createBufferSource(); const g = offline.createGain();
@@ -240,13 +255,13 @@ export default function App() {
 
   const generate = async () => {
     if (!intent) return;
-    if (!hfKey) { setShowKey(true); return; }
-    setScreen('generating'); setError(''); setStatus('Sending to music AI… 🎸');
+    if (!apiKey) { setShowKey(true); return; }
+    setScreen('generating'); setError(''); setStatus('Sending to Replicate AI… 🎸');
     try {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent, hfKey }),
+        body: JSON.stringify({ intent, apiKey }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generation failed');
@@ -275,7 +290,7 @@ export default function App() {
   if (screen === 'landing') return (
     <div style={{ ...S.page, display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at top left,rgba(124,58,237,.4),transparent 40%),radial-gradient(circle at bottom right,rgba(37,99,235,.28),transparent 35%),#0a0a0f' }}>
       {error && <Toast text={error} clear={() => setError('')} />}
-      {showKey && <KeyModal hfKey={hfKey} onSave={saveKey} onClose={() => setShowKey(false)} />}
+      {showKey && <KeyModal apiKey={apiKey} onSave={saveKey} onClose={() => setShowKey(false)} />}
       <button onClick={() => setShowKey(true)} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 10, color: '#fff', padding: '8px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
         <Settings size={14} /> API Key
       </button>
@@ -284,12 +299,12 @@ export default function App() {
         <h1 style={{ fontSize: 46, margin: 0, background: 'linear-gradient(90deg,#a78bfa,#fbbf24)', WebkitBackgroundClip: 'text', color: 'transparent' }}>VocalAI Studio</h1>
         <p style={{ color: 'rgba(255,255,255,.65)', fontSize: 16, marginBottom: 4 }}>Your voice. Any instrument. One song.</p>
         <p style={{ color: '#fbbf24', fontSize: 13, opacity: 0.8, marginBottom: 28 }}>Telangana Bonalu Folk • Madeen SK Style</p>
-        {!hfKey
+        {!apiKey
           ? <div style={{ ...S.card, marginBottom: 20, background: 'rgba(251,191,36,.08)', border: '1px solid rgba(251,191,36,.25)' }}>
-              <p style={{ margin: 0, fontSize: 14, color: '#fbbf24' }}>⚠️ Add your HuggingFace API key to generate music</p>
-              <button onClick={() => setShowKey(true)} style={{ ...S.btn('rgba(251,191,36,.2)'), marginTop: 10, color: '#fbbf24', border: '1px solid rgba(251,191,36,.3)' }}>Add API Key →</button>
+              <p style={{ margin: 0, fontSize: 14, color: '#fbbf24' }}>⚠️ Add your Replicate API token to generate music</p>
+              <button onClick={() => setShowKey(true)} style={{ ...S.btn('rgba(251,191,36,.2)'), marginTop: 10, color: '#fbbf24', border: '1px solid rgba(251,191,36,.3)' }}>Add API Token →</button>
             </div>
-          : <p style={{ fontSize: 12, color: '#10b981', marginBottom: 12 }}>✅ API key saved</p>
+          : <p style={{ fontSize: 12, color: '#10b981', marginBottom: 12 }}>✅ API token saved</p>
         }
         <button onClick={() => setScreen('studio')} style={{ ...S.btn('linear-gradient(135deg,#7c3aed,#2563eb)'), margin: '0 auto', padding: '16px 28px', fontSize: 17, maxWidth: 260 }}>
           Start Creating <Zap size={19} />
@@ -305,6 +320,7 @@ export default function App() {
         <Loader2 size={58} style={{ animation: 'spin 1s linear infinite', color: '#a78bfa' }} />
         <h2>Creating your song</h2>
         <p style={{ color: 'rgba(255,255,255,.55)' }}>{status}</p>
+        <p style={{ color: 'rgba(255,255,255,.35)', fontSize: 13 }}>This takes 20-40 seconds…</p>
         <button onClick={() => setScreen('studio')} style={{ background: 'transparent', color: 'rgba(255,255,255,.35)', border: 0, marginTop: 20, cursor: 'pointer' }}>Cancel</button>
       </div>
     </div>
@@ -313,11 +329,11 @@ export default function App() {
   if (screen === 'result') return (
     <div style={{ ...S.page, padding: 18 }}>
       {error && <Toast text={error} clear={() => setError('')} />}
-      {showKey && <KeyModal hfKey={hfKey} onSave={saveKey} onClose={() => setShowKey(false)} />}
+      {showKey && <KeyModal apiKey={apiKey} onSave={saveKey} onClose={() => setShowKey(false)} />}
       <div style={{ maxWidth: 560, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <button onClick={() => setScreen('studio')} style={{ background: 'transparent', color: 'rgba(255,255,255,.55)', border: 0, cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'center' }}><ArrowLeft size={16} /> Back</button>
-          <button onClick={() => setShowKey(true)} style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, color: '#fff', padding: '6px 12px', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}><Settings size={12} /> API Key</button>
+          <button onClick={() => setShowKey(true)} style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, color: '#fff', padding: '6px 12px', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}><Settings size={12} /> API Token</button>
         </div>
         <div style={{ textAlign: 'center', margin: '12px 0 22px' }}>
           <div style={{ fontSize: 52 }}>🎉</div>
@@ -352,14 +368,14 @@ export default function App() {
   return (
     <div style={{ ...S.page, height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {error && <Toast text={error} clear={() => setError('')} />}
-      {showKey && <KeyModal hfKey={hfKey} onSave={saveKey} onClose={() => setShowKey(false)} />}
+      {showKey && <KeyModal apiKey={apiKey} onSave={saveKey} onClose={() => setShowKey(false)} />}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <header style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <button onClick={() => setScreen('landing')} style={{ background: 'transparent', color: '#fff', border: 0, cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
           <ArrowLeft size={17} /> VocalAI Studio
         </button>
-        <button onClick={() => setShowKey(true)} style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, color: hfKey ? '#10b981' : '#fbbf24', padding: '7px 13px', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
-          <Settings size={13} /> {hfKey ? '✅ Key saved' : '⚠️ Add API Key'}
+        <button onClick={() => setShowKey(true)} style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, color: apiKey ? '#10b981' : '#fbbf24', padding: '7px 13px', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Settings size={13} /> {apiKey ? '✅ Token saved' : '⚠️ Add API Token'}
         </button>
       </header>
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
@@ -418,7 +434,7 @@ export default function App() {
               <p style={{ fontSize: 11, color: 'rgba(255,255,255,.55)', lineHeight: 1.6, margin: '6px 0 0' }}>{intent.music_prompt}</p>
             </div>
           </>}
-          <p style={{ fontSize: 11, color: 'rgba(255,255,255,.2)', textAlign: 'center', marginTop: 'auto' }}>Powered by HuggingFace MusicGen</p>
+          <p style={{ fontSize: 11, color: 'rgba(255,255,255,.2)', textAlign: 'center', marginTop: 'auto' }}>Powered by Replicate MusicGen</p>
         </aside>
       </div>
     </div>
