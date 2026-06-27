@@ -5,40 +5,44 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { intent, engine } = req.body || {};
-  if (!intent || !intent.music_prompt) {
-    return res.status(400).json({ error: "No intent provided" });
-  }
+  const { intent, hfKey } = req.body || {};
+  if (!intent || !intent.music_prompt) return res.status(400).json({ error: "No intent provided" });
+
+  const HF_KEY = hfKey || process.env.HF_API_KEY;
+  if (!HF_KEY) return res.status(400).json({ error: "No HuggingFace API key provided" });
 
   const prompt = intent.music_prompt;
-  const HF_KEY = "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";
-
   let lastError = "";
+
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      const hfRes = await fetch("https://router.huggingface.co/hf-inference/models/facebook/musicgen-small", {
+      const hfRes = await fetch("https://api-inference.huggingface.co/models/facebook/musicgen-small", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${HF_KEY}`,
           "Content-Type": "application/json",
+          "x-wait-for-model": "true"
         },
         body: JSON.stringify({ inputs: prompt }),
       });
 
       if (hfRes.status === 503 || hfRes.status === 504) {
         const b = await hfRes.json().catch(() => ({}));
-        await new Promise((r) => setTimeout(r, Math.min((b.estimated_time || 20) * 1000, 45000)));
+        await new Promise((r) => setTimeout(r, Math.min((b.estimated_time || 25) * 1000, 50000)));
         lastError = `Model loading (attempt ${attempt + 1})`;
         continue;
       }
-      if (hfRes.status === 401) return res.status(401).json({ error: "Invalid HuggingFace API key." });
+      if (hfRes.status === 401 || hfRes.status === 403) {
+        return res.status(401).json({ error: "Invalid HuggingFace API key. Make sure Inference API permission is enabled on your token." });
+      }
       if (hfRes.status === 429) {
-        await new Promise((r) => setTimeout(r, 12000));
+        await new Promise((r) => setTimeout(r, 15000));
         lastError = "Rate limited";
         continue;
       }
       if (!hfRes.ok) {
-        lastError = `HF error ${hfRes.status}`;
+        const errText = await hfRes.text().catch(() => "");
+        lastError = `HF error ${hfRes.status}: ${errText.slice(0, 100)}`;
         await new Promise((r) => setTimeout(r, 4000));
         continue;
       }
@@ -50,7 +54,6 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Convert to base64 and return as JSON (matches what App.jsx expects)
       const base64 = Buffer.from(audioBuffer).toString("base64");
       const audioUrl = `data:audio/flac;base64,${base64}`;
       return res.status(200).json({ audioUrl });
