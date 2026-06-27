@@ -12,14 +12,15 @@ export default async function handler(req, res) {
   if (!TOKEN) return res.status(400).json({ error: "No API token provided" });
 
   try {
-    const createRes = await fetch("https://api.replicate.com/v1/models/meta/musicgen/predictions", {
+    // Step 1 — create prediction using correct endpoint
+    const createRes = await fetch("https://api.replicate.com/v1/predictions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json",
-        "Prefer": "wait=60"
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        version: "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb",
         input: {
           prompt: intent.music_prompt,
           model_version: "stereo-large",
@@ -43,7 +44,8 @@ export default async function handler(req, res) {
     let prediction = await createRes.json();
     let attempts = 0;
 
-    while (prediction.status !== "succeeded" && prediction.status !== "failed" && attempts < 30) {
+    // Step 2 — poll until done
+    while (prediction.status !== "succeeded" && prediction.status !== "failed" && attempts < 40) {
       await new Promise(r => setTimeout(r, 3000));
       const pollRes = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
         headers: { Authorization: `Bearer ${TOKEN}` }
@@ -52,9 +54,14 @@ export default async function handler(req, res) {
       attempts++;
     }
 
-    if (prediction.status === "failed") return res.status(500).json({ error: "Generation failed: " + (prediction.error || "unknown") });
-    if (!prediction.output) return res.status(500).json({ error: "No audio output returned" });
+    if (prediction.status === "failed") {
+      return res.status(500).json({ error: "Generation failed: " + (prediction.error || "unknown") });
+    }
+    if (!prediction.output) {
+      return res.status(500).json({ error: "No audio output returned" });
+    }
 
+    // Step 3 — fetch audio and return as base64
     const audioRes = await fetch(prediction.output);
     const audioBuffer = await audioRes.arrayBuffer();
     const base64 = Buffer.from(audioBuffer).toString("base64");
