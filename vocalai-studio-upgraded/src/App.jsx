@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Download, Loader2, Pause, Play, RefreshCw, Send, Settings, Upload, X, Zap } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, RefreshCw, Send, Settings, Upload, X, Zap } from 'lucide-react';
 
 const S = {
   page: { minHeight:'100vh', background:'#0a0a0f', color:'#fff', fontFamily:'Inter,sans-serif' },
@@ -19,7 +19,7 @@ function KeyModal({ apiKey, onSave, onClose }) {
           <button onClick={onClose} style={{ background:'none', border:'none', color:'#fff', cursor:'pointer' }}><X size={18}/></button>
         </div>
         <p style={{ fontSize:13, color:'rgba(255,255,255,.5)', marginBottom:6 }}>Get token at <strong style={{ color:'#a78bfa' }}>replicate.com</strong> → Account → API Tokens</p>
-        <p style={{ fontSize:13, color:'#fbbf24', marginBottom:14 }}>💳 Add billing at replicate.com → Billing (~$0.01 per song)</p>
+        <p style={{ fontSize:13, color:'#fbbf24', marginBottom:14 }}>💳 ~$0.01 per song at replicate.com → Billing</p>
         <input type="password" value={val} onChange={e => setVal(e.target.value)} placeholder="r8_xxxxxxxxxxxxxxxxxxxx" style={{ ...S.inp, marginBottom:12 }} onKeyDown={e => e.key==='Enter' && val.trim() && onSave(val.trim())} autoFocus />
         <button onClick={() => val.trim() && onSave(val.trim())} style={{ ...S.btn('linear-gradient(135deg,#7c3aed,#6d28d9)') }}>Save & Continue</button>
       </div>
@@ -36,17 +36,35 @@ const INSTR = {
   'acoustic guitar': ['acoustic guitar','acoustic','guitar'],
   'bass': ['bass guitar','bass'],
   'synthesizer': ['synth','synthesizer','electronic','edm','dj','808'],
-  'strings': ['strings','violin','cello'],
+  'strings': ['strings','violin','cello','orchestral'],
 };
-const parseInstr = t => { const l=t.toLowerCase(); const f=Object.entries(INSTR).filter(([,ks])=>ks.some(k=>l.includes(k))).map(([i])=>i); return f.length?f:['frame drum','dholak','harmonium','hand clapping']; };
+const parseInstr = t => { const l=t.toLowerCase(); const f=Object.entries(INSTR).filter(([,ks])=>ks.some(k=>l.includes(k))).map(([i])=>i); return f.length?f:['frame drum','dholak','harmonium','hand clapping','strings']; };
 const parseMood = t => { const l=t.toLowerCase(); if(l.match(/sad|emotional|love fail/))return'sad emotional'; if(l.match(/romantic|love|romance/))return'romantic love'; if(l.match(/devotional|bonalu|goddess|temple|mahankali/))return'festive devotional'; if(l.match(/party|dance|hype|energy/))return'high energy party'; if(l.match(/chill|relax|calm|soft/))return'chill relaxed'; if(l.match(/happy|celebration|joy/))return'joyful celebratory'; return'festive folk'; };
 const parseIntensity = t => { const l=t.toLowerCase(); if(l.match(/full|loud|heavy|max|band/))return'full'; if(l.match(/subtle|soft|light|background|quiet/))return'subtle'; return'balanced'; };
 
-function ProducerChat({ onIntent }) {
+async function getAudioDuration(file) {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(file);
+    audio.onloadedmetadata = () => resolve(Math.round(audio.duration));
+    audio.onerror = () => resolve(60);
+  });
+}
+
+async function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function ProducerChat({ vocalName, duration, onIntent }) {
   const [step, setStep] = useState(0);
   const [ans, setAns] = useState({});
   const [isDJ, setIsDJ] = useState(false);
-  const [msgs, setMsgs] = useState([{ r:'bot', t:'🎤 Vocals uploaded! What vibe are you going for?\n\nExamples:\n• "high energy Bonalu celebration"\n• "sad romantic folk"\n• "full teenmaar party"\n• "devotional Mahankali song"' }]);
+  const [msgs, setMsgs] = useState([{ r:'bot', t:`🎤 Got your vocals "${vocalName}" — ${duration} seconds!\n\nI'll generate full orchestral BGM and mix it with your vocals.\n\nWhat vibe are you going for?\n• "high energy Bonalu celebration"\n• "sad romantic folk"\n• "devotional Mahankali song"\n• "full teenmaar party"` }]);
   const [inp, setInp] = useState('');
   const endRef = useRef(null);
   useEffect(()=>{ endRef.current?.scrollIntoView({ behavior:'smooth' }); },[msgs]);
@@ -56,23 +74,23 @@ function ProducerChat({ onIntent }) {
     setInp(''); setMsgs(p=>[...p,{r:'user',t:val}]);
     if(step===0){
       const mood=parseMood(val); setAns(p=>({...p,mood})); setStep(1);
-      bot(`${mood} — perfect! 🎵\n\nWhat instruments do you want?\n• "dappu, dholak and harmonium" — classic Bonalu\n• "electric guitar and bass" — modern DJ\n• "default" — classic Bonalu set automatically`);
+      bot(`${mood} — perfect! 🎵\n\nWhat instruments?\n• "default" — classic Bonalu (dappu, dholak, harmonium)\n• "orchestra" — AR Rahman style (strings, flute, brass)\n• "full band" — everything together\n• Or describe freely`);
     } else if(step===1){
       const dj=/dj|electronic|edm|modern/i.test(val); setIsDJ(dj);
-      const instr=/default|classic|bonalu|traditional/i.test(val)?['frame drum','dholak','harmonium','hand clapping']:parseInstr(val);
+      const instr=/default|classic|bonalu/i.test(val)?['frame drum','dholak','harmonium','hand clapping']:/orchestra|rahman|cinematic/i.test(val)?['strings','flute','piano','harmonium','frame drum','brass']:/full.?band|everything/i.test(val)?['frame drum','dholak','harmonium','strings','flute','piano','hand clapping','bass']:parseInstr(val);
       setAns(p=>({...p,instr})); setStep(2);
-      bot(`Adding: ${instr.join(', ')} ${dj?'🎧 DJ/electronic style':'🥁 traditional acoustic folk'}\n\nHow loud should the music be behind your vocals?\n• "subtle" — very soft background\n• "balanced" — good mix\n• "full" — full loud festival energy`);
+      bot(`Perfect! Adding: ${instr.join(', ')} 🎵\n\nHow intense?\n• "subtle" — soft background music\n• "balanced" — good mix\n• "full" — AR Rahman full power`);
     } else if(step===2){
       const intensity=parseIntensity(val); setAns(p=>({...p,intensity})); setStep(3);
-      bot(`${intensity==='full'?'Full festival energy! 🔥':intensity==='subtle'?'Soft and subtle 🌙':'Nice balanced mix 🎶'}\n\nAny special requests?\n• "add echo on my voice"\n• "make it start slow"\n• "keep drums very strong"\n\nOr say "generate" to create now!`);
+      bot(`${intensity==='full'?'Full AR Rahman power! 🔥':intensity==='subtle'?'Soft and beautiful 🌙':'Perfect balanced mix 🎶'}\n\nAny special direction?\n• "dramatic strings build up"\n• "flute intro"\n• "heavy bass"\n\nOr say "generate" now!`);
     } else if(step===3){
       setStep(4);
       const a={...ans};
-      const instr=a.instr||['frame drum','dholak','harmonium','hand clapping'];
+      const instr=a.instr||['frame drum','dholak','harmonium','hand clapping','strings'];
       const mood=a.mood||'festive devotional';
       const intensity=a.intensity||'full';
-      const intent={ mood, genre:isDJ?'Telangana DJ Folk':'Telangana Bonalu Folk', key:'C major', bpm:intensity==='full'?135:intensity==='subtle'?85:110, instruments:instr, intensity, music_prompt:'' };
-      bot(`All set! 🎵\n\n🎼 Mood: ${mood}\n🎸 Instruments: ${instr.join(', ')}\n⚡ Intensity: ${intensity}\n🎵 Style: ${intent.genre}\n\nHit Generate Song on the right! 🚀`);
+      const intent={ mood, genre:isDJ?'Telangana DJ Folk':'Telangana Bonalu Folk Orchestral', key:'C minor', bpm:134, instruments:instr, intensity, duration, extras:val };
+      bot(`All set! 🎵\n\n🎼 ${mood}\n🎸 ${instr.join(', ')}\n⚡ ${intensity}\n⏱ ${duration} seconds full song\n\nGenerating mixed song now! 🚀`);
       onIntent(intent);
     }
   };
@@ -105,51 +123,61 @@ export default function App() {
   const [showKey, setShowKey] = useState(false);
   const [vocalFile, setVocalFile] = useState(null);
   const [vocalUrl, setVocalUrl] = useState(null);
+  const [vocalDuration, setVocalDuration] = useState(60);
   const [intent, setIntent] = useState(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const [musicUrl, setMusicUrl] = useState(null);
-  const [playing, setPlaying] = useState(false);
-  const [vVol, setVVol] = useState(0.85);
-  const [mVol, setMVol] = useState(0.6);
+  const [resultUrl, setResultUrl] = useState(null);
+  const [isMixed, setIsMixed] = useState(false);
   const fileRef = useRef(null);
   const audioRef = useRef(null);
-  const vocRef = useRef(null);
 
   const saveKey = key => { setApiKey(key); setShowKey(false); try{localStorage.setItem('replicate_key',key)}catch{} };
 
-  const handleUpload = file => {
+  const handleUpload = async file => {
     if(!file)return;
-    if(!file.type.startsWith('audio/'))return setError('Please upload an audio file (MP3, WAV, M4A, OGG).');
+    if(!file.type.startsWith('audio/'))return setError('Please upload an audio file.');
     if(file.size>50*1024*1024)return setError('Max 50 MB.');
-    setError(''); setIntent(null); setMusicUrl(null);
-    setVocalFile(file); setVocalUrl(URL.createObjectURL(file)); setScreen('studio');
+    setError(''); setIntent(null); setResultUrl(null);
+    setVocalFile(file); setVocalUrl(URL.createObjectURL(file));
+    const dur = await getAudioDuration(file);
+    setVocalDuration(dur);
+    setScreen('studio');
   };
 
   const generate = async () => {
     if(!intent)return;
     if(!apiKey){setShowKey(true);return;}
-    setScreen('generating'); setError(''); setStatus('Generating your Telangana folk instrumental… 🎸');
+    setScreen('generating'); setError('');
+    setStatus('Sending vocals to AI… 🎤');
     try {
+      let vocalBase64 = null;
+      if(vocalFile) {
+        vocalBase64 = await fileToBase64(vocalFile);
+        setStatus('Generating orchestral BGM matching your vocals… 🎸');
+      }
       const res = await fetch('/api/generate', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ intent, apiKey })
+        body:JSON.stringify({ intent, apiKey, vocalBase64, duration: Math.min(vocalDuration, 180) })
       });
       const data = await res.json();
       if(!res.ok) throw new Error(data.error||`Server error ${res.status}`);
       if(!data.audioUrl) throw new Error('No audio returned');
-      setMusicUrl(data.audioUrl);
+      setResultUrl(data.audioUrl);
+      setIsMixed(data.mixed || false);
       setScreen('result');
     } catch(e) { setError(e.message); setScreen('studio'); }
   };
 
-  const download = (url, name) => {
-    const a=document.createElement('a'); a.href=url; a.download=name;
+  const download = () => {
+    if(!resultUrl)return;
+    const a=document.createElement('a');
+    a.href=resultUrl;
+    a.download=`vocalai-${intent?.mood||'song'}-${isMixed?'mixed':'bgm'}.${isMixed?'mp3':'wav'}`;
     document.body.appendChild(a); a.click(); a.remove();
   };
 
-  // LANDING
   if(screen==='landing') return (
     <div style={{...S.page,display:'grid',placeItems:'center',padding:24,position:'relative',background:'radial-gradient(circle at top left,rgba(124,58,237,.4),transparent 40%),radial-gradient(circle at bottom right,rgba(37,99,235,.28),transparent 35%),#0a0a0f'}}>
       {error&&<Toast text={error} clear={()=>setError('')}/>}
@@ -158,7 +186,7 @@ export default function App() {
       <div style={{textAlign:'center',maxWidth:560}}>
         <div style={{fontSize:66,marginBottom:10}}>🎵</div>
         <h1 style={{fontSize:42,margin:0,background:'linear-gradient(90deg,#a78bfa,#fbbf24)',WebkitBackgroundClip:'text',color:'transparent'}}>VocalAI Studio</h1>
-        <p style={{color:'rgba(255,255,255,.65)',fontSize:16,marginBottom:4}}>Your voice. Any instrument. One song.</p>
+        <p style={{color:'rgba(255,255,255,.65)',fontSize:16,marginBottom:4}}>Your voice. Full orchestral song. AR Rahman quality.</p>
         <p style={{color:'#fbbf24',fontSize:13,opacity:.85,marginBottom:24}}>Telangana Bonalu Folk • Madeen SK Style</p>
         {!apiKey
           ?<div style={{...S.card,marginBottom:20,background:'rgba(251,191,36,.07)',border:'1px solid rgba(251,191,36,.25)'}}>
@@ -167,85 +195,74 @@ export default function App() {
           </div>
           :<p style={{fontSize:13,color:'#10b981',marginBottom:16}}>✅ API token saved — ready to generate!</p>
         }
-        <button onClick={()=>setScreen('studio')} style={{...S.btn('linear-gradient(135deg,#7c3aed,#2563eb)'),margin:'0 auto',padding:'15px 28px',fontSize:16,maxWidth:240}}>Start Creating <Zap size={18}/></button>
+        <button onClick={()=>setScreen('studio')} style={{...S.btn('linear-gradient(135deg,#7c3aed,#2563eb)'),margin:'0 auto',padding:'15px 28px',fontSize:16,maxWidth:260}}>Start Creating <Zap size={18}/></button>
       </div>
     </div>
   );
 
-  // GENERATING
   if(screen==='generating') return (
     <div style={{...S.page,display:'grid',placeItems:'center',padding:24}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={{textAlign:'center',maxWidth:380}}>
+      <div style={{textAlign:'center',maxWidth:420}}>
         <Loader2 size={56} style={{animation:'spin 1s linear infinite',color:'#a78bfa',marginBottom:20}}/>
-        <h2 style={{marginBottom:8}}>Creating your song</h2>
+        <h2 style={{marginBottom:8}}>Creating your full song</h2>
         <p style={{color:'rgba(255,255,255,.55)',marginBottom:6}}>{status}</p>
-        <p style={{color:'rgba(255,255,255,.3)',fontSize:13}}>Please wait — this takes 20–40 seconds</p>
+        <p style={{color:'rgba(255,255,255,.3)',fontSize:13,marginBottom:4}}>Generating {vocalDuration} seconds of orchestral BGM…</p>
+        <p style={{color:'rgba(255,255,255,.2)',fontSize:12}}>Longer songs take 2-5 minutes. Please don't close this tab.</p>
         <button onClick={()=>setScreen('studio')} style={{background:'transparent',color:'rgba(255,255,255,.3)',border:0,marginTop:24,cursor:'pointer',fontSize:13}}>Cancel</button>
       </div>
     </div>
   );
 
-  // RESULT
   if(screen==='result') return (
     <div style={{...S.page,padding:18}}>
       {error&&<Toast text={error} clear={()=>setError('')}/>}
       {showKey&&<KeyModal apiKey={apiKey} onSave={saveKey} onClose={()=>setShowKey(false)}/>}
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <div style={{maxWidth:600,margin:'0 auto'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
           <button onClick={()=>setScreen('studio')} style={{background:'transparent',color:'rgba(255,255,255,.55)',border:0,cursor:'pointer',display:'flex',gap:6,alignItems:'center'}}><ArrowLeft size={16}/> Back</button>
           <button onClick={()=>setShowKey(true)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,color:'#fff',padding:'6px 12px',cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',gap:5}}><Settings size={12}/> API Token</button>
         </div>
-
         <div style={{textAlign:'center',marginBottom:24}}>
           <div style={{fontSize:52}}>🎉</div>
-          <h2 style={{margin:'8px 0 4px'}}>Your song is ready!</h2>
-          <p style={{color:'rgba(255,255,255,.45)',margin:0}}>{intent?.genre} • {intent?.mood}</p>
+          <h2 style={{margin:'8px 0 4px'}}>{isMixed ? 'Full Mixed Song Ready!' : 'BGM Generated!'}</h2>
+          <p style={{color:'rgba(255,255,255,.45)',margin:0}}>{intent?.genre} • {intent?.mood} • {vocalDuration}s</p>
+          {isMixed && <p style={{color:'#10b981',fontSize:13,marginTop:6}}>✅ Vocals + BGM mixed together</p>}
         </div>
 
-        {/* Generated Music Player */}
         <div style={{...S.card,marginBottom:16}}>
-          <p style={{margin:'0 0 12px',fontSize:13,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:'.05em'}}>🎸 Generated Instrumental</p>
-          <audio ref={audioRef} src={musicUrl} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)} style={{width:'100%',marginBottom:12}}  controls/>
-          <button onClick={()=>download(musicUrl,`instrumental-${intent?.mood||'song'}.mp3`)} style={{...S.btn('#059669')}}>
-            <Download size={17}/> Download Instrumental
+          <p style={{margin:'0 0 12px',fontSize:13,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:'.05em'}}>
+            {isMixed ? '🎵 Full Mixed Song' : '🎸 Generated BGM'}
+          </p>
+          <audio ref={audioRef} src={resultUrl} style={{width:'100%',marginBottom:14}} controls/>
+          <button onClick={download} style={{...S.btn('#059669')}}>
+            <Download size={17}/> Download {isMixed?'Full Song (MP3)':'BGM (WAV)'}
           </button>
         </div>
 
-        {/* Vocal Player */}
-        {vocalUrl&&(
-          <div style={{...S.card,marginBottom:16}}>
-            <p style={{margin:'0 0 12px',fontSize:13,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:'.05em'}}>🎤 Your Vocals</p>
-            <audio ref={vocRef} src={vocalUrl} style={{width:'100%',marginBottom:12}} controls/>
-            <p style={{fontSize:12,color:'rgba(255,255,255,.4)',margin:0}}>Play both simultaneously to hear the mix — or download both and mix in any audio editor (Audacity is free).</p>
-          </div>
-        )}
-
-        {/* Song details */}
         {intent&&(
           <div style={{...S.card,marginBottom:16}}>
-            <p style={{margin:'0 0 12px',fontSize:13,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:'.05em'}}>Song Details</p>
-            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
+            <p style={{margin:'0 0 10px',fontSize:13,color:'rgba(255,255,255,.5)',textTransform:'uppercase',letterSpacing:'.05em'}}>Song Details</p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
               {intent.instruments?.map(i=><span key={i} style={S.pill}>{i}</span>)}
               <span style={{...S.pill,color:'#fbbf24',background:'rgba(251,191,36,.15)',borderColor:'rgba(251,191,36,.3)'}}>{intent.mood}</span>
               <span style={{...S.pill,color:'#34d399',background:'rgba(52,211,153,.12)',borderColor:'rgba(52,211,153,.25)'}}>{intent.intensity}</span>
-              <span style={{...S.pill,color:'#60a5fa',background:'rgba(96,165,250,.12)',borderColor:'rgba(96,165,250,.25)'}}>{intent.bpm} BPM</span>
+              <span style={{...S.pill,color:'#60a5fa',background:'rgba(96,165,250,.12)',borderColor:'rgba(96,165,250,.25)'}}>C minor • 134 BPM</span>
+              <span style={{...S.pill,color:'#f472b6',background:'rgba(244,114,182,.12)',borderColor:'rgba(244,114,182,.25)'}}>{vocalDuration}s</span>
             </div>
           </div>
         )}
 
         <button onClick={generate} style={{...S.btn('linear-gradient(135deg,#7c3aed,#b45309)'),marginBottom:10,padding:15,fontSize:15}}>
-          <RefreshCw size={17}/> Regenerate Song
+          <RefreshCw size={17}/> Regenerate
         </button>
-        <button onClick={()=>{setVocalFile(null);setVocalUrl(null);setIntent(null);setMusicUrl(null);setScreen('studio');}} style={{...S.btn('rgba(255,255,255,.04)'),border:'1px solid rgba(255,255,255,.08)',color:'rgba(255,255,255,.5)'}}>
+        <button onClick={()=>{setVocalFile(null);setVocalUrl(null);setIntent(null);setResultUrl(null);setScreen('studio');}} style={{...S.btn('rgba(255,255,255,.04)'),border:'1px solid rgba(255,255,255,.08)',color:'rgba(255,255,255,.5)'}}>
           Start New Song
         </button>
       </div>
     </div>
   );
 
-  // STUDIO
   return (
     <div style={{...S.page,height:'100vh',display:'flex',flexDirection:'column'}}>
       {error&&<Toast text={error} clear={()=>setError('')}/>}
@@ -255,7 +272,6 @@ export default function App() {
         <button onClick={()=>setScreen('landing')} style={{background:'transparent',color:'#fff',border:0,cursor:'pointer',display:'flex',gap:8,alignItems:'center',fontWeight:600,fontSize:15}}><ArrowLeft size={17}/> VocalAI Studio</button>
         <button onClick={()=>setShowKey(true)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.1)',borderRadius:8,color:apiKey?'#10b981':'#fbbf24',padding:'7px 13px',cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',gap:5}}><Settings size={13}/> {apiKey?'✅ Token saved':'⚠️ Add API Token'}</button>
       </header>
-
       <div style={{flex:1,minHeight:0,display:'grid',gridTemplateColumns:'minmax(0,1fr) 300px'}}>
         <main style={{minHeight:0,display:'flex',flexDirection:'column',overflow:'hidden'}}>
           {!vocalFile&&(
@@ -263,7 +279,8 @@ export default function App() {
               <div onClick={()=>fileRef.current?.click()} onDrop={e=>{e.preventDefault();handleUpload(e.dataTransfer.files[0]);}} onDragOver={e=>e.preventDefault()} style={{...S.card,textAlign:'center',cursor:'pointer',borderStyle:'dashed',padding:40}}>
                 <Upload size={36} style={{color:'#a78bfa',marginBottom:12}}/>
                 <h3 style={{margin:'0 0 6px'}}>Upload your vocals</h3>
-                <p style={{color:'rgba(255,255,255,.4)',margin:0,fontSize:14}}>MP3, WAV, M4A, OGG — up to 50 MB</p>
+                <p style={{color:'rgba(255,255,255,.4)',margin:0,fontSize:14}}>MP3, WAV, M4A, OGG — full song length</p>
+                <p style={{color:'rgba(255,255,255,.25)',margin:'8px 0 0',fontSize:12}}>AI generates matching BGM + mixes it with your vocals</p>
               </div>
               <input ref={fileRef} type="file" accept="audio/*" onChange={e=>handleUpload(e.target.files?.[0])} style={{display:'none'}}/>
             </div>
@@ -273,7 +290,7 @@ export default function App() {
               <div style={{...S.card,padding:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <div>
                   <strong style={{fontSize:13}}>{vocalFile.name}</strong>
-                  <div style={{color:'rgba(255,255,255,.4)',fontSize:12,marginTop:2}}>Ready for AI producer chat</div>
+                  <div style={{color:'rgba(255,255,255,.4)',fontSize:12,marginTop:2}}>{vocalDuration} seconds • Ready for AR Rahman treatment 🎵</div>
                 </div>
                 <button onClick={()=>{setVocalFile(null);setVocalUrl(null);setIntent(null);}} style={{background:'transparent',color:'rgba(255,255,255,.5)',border:0,cursor:'pointer'}}><X size={17}/></button>
               </div>
@@ -281,12 +298,14 @@ export default function App() {
           )}
           <div style={{flex:1,minHeight:0,overflow:'hidden'}}>
             {vocalFile
-              ?<ProducerChat onIntent={setIntent}/>
-              :<div style={{height:'100%',display:'grid',placeItems:'center',color:'rgba(255,255,255,.25)',textAlign:'center',padding:24,fontSize:14}}>Upload vocals above to start the AI producer chat 🎤</div>
+              ?<ProducerChat vocalName={vocalFile.name} duration={vocalDuration} onIntent={setIntent}/>
+              :<div style={{height:'100%',display:'grid',placeItems:'center',color:'rgba(255,255,255,.25)',textAlign:'center',padding:24,fontSize:14}}>
+                Upload your vocals above 🎤<br/>
+                <span style={{fontSize:12,marginTop:8,display:'block'}}>Full orchestral BGM will be generated and mixed with your voice</span>
+              </div>
             }
           </div>
         </main>
-
         <aside style={{borderLeft:'1px solid rgba(255,255,255,.08)',padding:14,overflowY:'auto',display:'flex',flexDirection:'column',gap:12}}>
           <div style={S.card}>
             <h3 style={{marginTop:0,fontSize:14,marginBottom:12}}>Song Plan</h3>
@@ -294,13 +313,9 @@ export default function App() {
               ?<div style={{display:'flex',flexDirection:'column',gap:10}}>
                 <Field k="Mood" v={intent.mood}/>
                 <Field k="Genre" v={intent.genre}/>
-                <Field k="BPM" v={`${intent.bpm} BPM`}/>
-                <div>
-                  <small style={{color:'rgba(255,255,255,.4)'}}>Instruments</small>
-                  <div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:6}}>
-                    {intent.instruments?.map(i=><span key={i} style={S.pill}>{i}</span>)}
-                  </div>
-                </div>
+                <Field k="Key / BPM" v="C minor • 134 BPM"/>
+                <Field k="Duration" v={`${vocalDuration} seconds`}/>
+                <div><small style={{color:'rgba(255,255,255,.4)'}}>Instruments</small><div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:6}}>{intent.instruments?.map(i=><span key={i} style={S.pill}>{i}</span>)}</div></div>
                 <Field k="Intensity" v={intent.intensity}/>
               </div>
               :<p style={{color:'rgba(255,255,255,.3)',fontSize:13,margin:0}}>Answer the chat to build your plan…</p>
@@ -308,9 +323,13 @@ export default function App() {
           </div>
           {intent&&(
             <button onClick={generate} style={{...S.btn('linear-gradient(135deg,#7c3aed,#b45309)'),padding:16,fontSize:15}}>
-              <Zap size={18}/> Generate Song 🚀
+              <Zap size={18}/> Generate Full Song 🚀
             </button>
           )}
+          <div style={{...S.card,background:'rgba(124,58,237,.08)',border:'1px solid rgba(124,58,237,.2)'}}>
+            <p style={{margin:'0 0 6px',fontSize:12,color:'#a78bfa',fontWeight:600}}>🎵 How it works</p>
+            <p style={{margin:0,fontSize:11,color:'rgba(255,255,255,.45)',lineHeight:1.6}}>1. Upload vocals<br/>2. AI generates matching orchestral BGM<br/>3. Server mixes vocals + BGM together<br/>4. Download your complete song</p>
+          </div>
           <p style={{fontSize:11,color:'rgba(255,255,255,.18)',textAlign:'center',marginTop:'auto'}}>Powered by Replicate MusicGen</p>
         </aside>
       </div>
