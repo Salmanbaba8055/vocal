@@ -24,7 +24,11 @@ export default async function handler(req, res) {
         `https://api.replicate.com/v1/predictions/${predictionId}`,
         { headers: { Authorization: `Bearer ${TOKEN}` } }
       );
-      const prediction = await poll.json();
+      const text = await poll.text();
+      let prediction;
+      try { prediction = JSON.parse(text); }
+      catch { return res.status(500).json({ error: "Poll parse error: " + text.slice(0, 100) }); }
+
       if (prediction.status === "succeeded" && prediction.output) {
         const audioRes = await fetch(prediction.output);
         const audioBuffer = await audioRes.arrayBuffer();
@@ -37,19 +41,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: prediction.status, predictionId });
     }
 
-    // MODE 1 — start new prediction
+    // MODE 1 — start new prediction using pinned version
     if (!intent) return res.status(400).json({ error: "No intent provided" });
 
     const prompt = `Telangana Bonalu folk music ${intent.mood || "festive"} mood, C minor 134 BPM, dappu drums dholak harmonium hand clapping strings, AR Rahman cinematic quality, instrumental backing track`;
 
-    // FIXED: max 8 seconds to keep cost under $0.05
-    const createRes = await fetch("https://api.replicate.com/v1/models/meta/musicgen/predictions", {
+    const createRes = await fetch("https://api.replicate.com/v1/predictions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${TOKEN}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        version: "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb",
         input: {
           prompt,
           model_version: "stereo-large",
@@ -64,14 +68,10 @@ export default async function handler(req, res) {
       })
     });
 
-    // Always parse as text first to avoid JSON parse errors
     const responseText = await createRes.text();
     let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      return res.status(500).json({ error: `Replicate error: ${responseText.slice(0, 200)}` });
-    }
+    try { data = JSON.parse(responseText); }
+    catch { return res.status(500).json({ error: "Replicate response error: " + responseText.slice(0, 200) }); }
 
     if (createRes.status === 401 || createRes.status === 403) {
       return res.status(401).json({ error: "Invalid Replicate token." });
