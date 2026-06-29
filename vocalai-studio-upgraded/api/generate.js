@@ -29,19 +29,33 @@ export default async function handler(req, res) {
       try { prediction = JSON.parse(text); }
       catch { return res.status(500).json({ error: "Poll parse error: " + text.slice(0, 100) }); }
 
-      if (prediction.status === "succeeded" && prediction.output) {
-        const audioRes = await fetch(prediction.output);
+      if (prediction.status === "succeeded") {
+        // output can be string or array — handle both
+        let audioUrl = prediction.output;
+        if (Array.isArray(audioUrl)) audioUrl = audioUrl[0];
+        if (!audioUrl) {
+          return res.status(500).json({ 
+            error: "No audio in output. Raw output: " + JSON.stringify(prediction.output).slice(0, 200) 
+          });
+        }
+        const audioRes = await fetch(audioUrl);
+        if (!audioRes.ok) return res.status(500).json({ error: "Failed to download audio from Replicate" });
         const audioBuffer = await audioRes.arrayBuffer();
         const base64 = Buffer.from(audioBuffer).toString("base64");
         return res.status(200).json({ status: "succeeded", audioUrl: `data:audio/mp3;base64,${base64}` });
       }
+
       if (prediction.status === "failed" || prediction.status === "canceled") {
-        return res.status(500).json({ status: prediction.status, error: prediction.error || "Generation failed" });
+        return res.status(500).json({ 
+          status: prediction.status, 
+          error: prediction.error || "Generation failed" 
+        });
       }
+
       return res.status(200).json({ status: prediction.status, predictionId });
     }
 
-    // MODE 1 — start new prediction using pinned version
+    // MODE 1 — start new prediction
     if (!intent) return res.status(400).json({ error: "No intent provided" });
 
     const prompt = `Telangana Bonalu folk music ${intent.mood || "festive"} mood, C minor 134 BPM, dappu drums dholak harmonium hand clapping strings, AR Rahman cinematic quality, instrumental backing track`;
@@ -71,11 +85,8 @@ export default async function handler(req, res) {
     const responseText = await createRes.text();
     let data;
     try { data = JSON.parse(responseText); }
-    catch { return res.status(500).json({ error: "Replicate response error: " + responseText.slice(0, 200) }); }
+    catch { return res.status(500).json({ error: "Parse error: " + responseText.slice(0, 200) }); }
 
-    if (createRes.status === 401 || createRes.status === 403) {
-      return res.status(401).json({ error: "Invalid Replicate token." });
-    }
     if (!createRes.ok) {
       return res.status(500).json({ error: data.detail || data.error || `Replicate error ${createRes.status}` });
     }
