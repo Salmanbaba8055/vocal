@@ -13,54 +13,53 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { intent, apiKey, vocalBase64, duration } = req.body || {};
-  if (!intent) return res.status(400).json({ error: "No intent provided" });
-
-  const TOKEN = apiKey || process.env.REPLICATE_API_TOKEN;
-  if (!TOKEN) return res.status(400).json({ error: "No Replicate API token" });
-
-  const prompt = `Cinematic South Indian Telangana Bonalu folk orchestral music, ${intent.mood || "festive devotional"} mood, C minor, 134 BPM teenmaar rhythm, powerful dappu frame drums and dholak percussion, melodic harmonium lead, rhythmic hand clapping, rich orchestral strings swelling emotionally, flute melody, brass section, layered cinematic production like AR Rahman, devotional Mahankali goddess festival energy, authentic Telangana folk meets grand orchestral arrangement, full band sound, emotional powerful dramatic, perfectly timed instrumental backing track`;
-
-  const songDuration = Math.min(Math.max(duration || 30, 10), 180);
-
   try {
-    // Step 1 — Generate BGM via Replicate MusicGen
-    const input = {
-      prompt,
-      model_version: "stereo-melody-large",
-      duration: songDuration,
-      temperature: 1,
-      top_k: 250,
-      top_p: 0,
-      classifier_free_guidance: 3,
-      output_format: "mp3",
-      normalization_strategy: "loudness"
-    };
+    const { intent, apiKey, duration } = req.body || {};
+    if (!intent) return res.status(400).json({ error: "No intent provided" });
 
-    if (vocalBase64) {
-      input.input_audio = vocalBase64;
-      input.continuation = false;
-    }
+    const TOKEN = apiKey || process.env.REPLICATE_API_TOKEN;
+    if (!TOKEN) return res.status(400).json({ error: "No Replicate API token" });
 
-    const createRes = await fetch("https://api.replicate.com/v1/predictions", {
+    const prompt = `Cinematic Telangana Bonalu folk orchestral music, ${intent.mood || "festive devotional"} mood, C minor 134 BPM, powerful dappu frame drums dholak percussion teenmaar rhythm, bright harmonium melody, hand clapping, rich orchestral strings, flute, brass, AR Rahman style cinematic production, devotional Mahankali festival energy, professional studio quality instrumental backing track`;
+
+    const songDuration = Math.min(Math.max(duration || 30, 8), 180);
+
+    // Step 1 — create prediction using latest working model
+    const createRes = await fetch("https://api.replicate.com/v1/models/meta/musicgen/predictions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+        "Prefer": "wait"
+      },
       body: JSON.stringify({
-        version: "b05b1dff1d8c6dc63d14b0cdb42135378dcb87f6373b0d3d341ede46e59e2b38",
-        input
+        input: {
+          prompt,
+          model_version: "stereo-large",
+          duration: songDuration,
+          temperature: 1,
+          top_k: 250,
+          top_p: 0,
+          classifier_free_guidance: 3,
+          output_format: "mp3",
+          normalization_strategy: "loudness"
+        }
       })
     });
 
     if (createRes.status === 401 || createRes.status === 403) {
       return res.status(401).json({ error: "Invalid Replicate token." });
     }
+
     if (!createRes.ok) {
-      const e = await createRes.json().catch(() => ({}));
-      return res.status(500).json({ error: e.detail || `Replicate error ${createRes.status}` });
+      const errText = await createRes.text();
+      return res.status(500).json({ error: `Replicate error ${createRes.status}: ${errText.slice(0, 200)}` });
     }
 
     let prediction = await createRes.json();
     let attempts = 0;
+
+    // Step 2 — poll until done
     while (
       prediction.status !== "succeeded" &&
       prediction.status !== "failed" &&
@@ -77,36 +76,12 @@ export default async function handler(req, res) {
     }
 
     if (prediction.status !== "succeeded" || !prediction.output) {
-      return res.status(500).json({ error: "Generation failed: " + (prediction.error || "no output") });
+      return res.status(500).json({ error: "Generation failed: " + (prediction.error || "no output returned") });
     }
 
-    // Step 2 — Download the generated BGM
-    const bgmRes = await fetch(prediction.output);
-    const bgmBuffer = Buffer.from(await bgmRes.arrayBuffer());
-    const bgmBase64 = bgmBuffer.toString("base64");
-
-    // Step 3 — Mix vocals + BGM on server using pure JavaScript
-    // Simple mix: interleave samples from both tracks
-    if (vocalBase64) {
-      try {
-        const mixed = await mixAudioBuffers(vocalBase64, bgmBase64, 0.9, 0.6);
-        return res.status(200).json({ audioUrl: `data:audio/mp3;base64,${mixed}`, mixed: true });
-      } catch (mixErr) {
-        // If mix fails just return BGM
-        return res.status(200).json({ audioUrl: `data:audio/mp3;base64,${bgmBase64}`, mixed: false, note: "Mix failed, returning BGM only" });
-      }
+    // Step 3 — download audio and return as base64
+    const audioRes = await fetch(prediction.output);
+    if (!audioRes.ok) {
+      return res.status(500).json({ error: "Failed to download generated audio" });
     }
-
-    return res.status(200).json({ audioUrl: `data:audio/mp3;base64,${bgmBase64}`, mixed: false });
-
-  } catch (e) {
-    return res.status(500).json({ error: "Server error: " + e.message });
-  }
-}
-
-// Mix two base64 audio files using Replicate's audio-merger model
-async function mixAudioBuffers(vocal64, bgm64, vocalVol, bgmVol) {
-  // Use a simple concat approach - return BGM for now
-  // Real mixing requires ffmpeg which isn't available in Vercel serverless
-  return bgm64;
-}
+    const audioBuffer = await
