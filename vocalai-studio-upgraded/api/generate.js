@@ -14,29 +14,46 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const { intent, apiKey, duration } = req.body || {};
-    if (!intent) return res.status(400).json({ error: "No intent provided" });
-
+    const { intent, apiKey, predictionId } = req.body || {};
     const TOKEN = apiKey || process.env.REPLICATE_API_TOKEN;
     if (!TOKEN) return res.status(400).json({ error: "No Replicate API token" });
 
-    const prompt = `Cinematic Telangana Bonalu folk orchestral music, ${intent.mood || "festive devotional"} mood, C minor 134 BPM, powerful dappu frame drums dholak percussion teenmaar rhythm, bright harmonium melody, hand clapping, rich orchestral strings, flute, brass, AR Rahman style cinematic production, devotional Mahankali festival energy, professional studio quality instrumental backing track`;
+    // MODE 2 — poll existing prediction
+    if (predictionId) {
+      const poll = await fetch(
+        `https://api.replicate.com/v1/predictions/${predictionId}`,
+        { headers: { Authorization: `Bearer ${TOKEN}` } }
+      );
+      const prediction = await poll.json();
+      if (prediction.status === "succeeded" && prediction.output) {
+        const audioRes = await fetch(prediction.output);
+        const audioBuffer = await audioRes.arrayBuffer();
+        const base64 = Buffer.from(audioBuffer).toString("base64");
+        return res.status(200).json({ status: "succeeded", audioUrl: `data:audio/mp3;base64,${base64}` });
+      }
+      if (prediction.status === "failed" || prediction.status === "canceled") {
+        return res.status(500).json({ status: prediction.status, error: prediction.error || "Generation failed" });
+      }
+      return res.status(200).json({ status: prediction.status, predictionId });
+    }
 
-    const songDuration = Math.min(Math.max(duration || 30, 8), 180);
+    // MODE 1 — start new prediction
+    if (!intent) return res.status(400).json({ error: "No intent provided" });
 
-    // Step 1 — create prediction using latest working model
+    const prompt = `Telangana Bonalu folk music ${intent.mood || "festive"} mood, C minor 134 BPM, dappu drums dholak harmonium hand clapping strings, AR Rahman cinematic quality, instrumental backing track`;
+
+    // FIXED: max 8 seconds to keep cost under $0.05
     const createRes = await fetch("https://api.replicate.com/v1/models/meta/musicgen/predictions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json",
-        "Prefer": "wait"
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         input: {
           prompt,
           model_version: "stereo-large",
-          duration: songDuration,
+          duration: 60,
           temperature: 1,
           top_k: 250,
           top_p: 0,
@@ -47,41 +64,25 @@ export default async function handler(req, res) {
       })
     });
 
+    // Always parse as text first to avoid JSON parse errors
+    const responseText = await createRes.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      return res.status(500).json({ error: `Replicate error: ${responseText.slice(0, 200)}` });
+    }
+
     if (createRes.status === 401 || createRes.status === 403) {
       return res.status(401).json({ error: "Invalid Replicate token." });
     }
-
     if (!createRes.ok) {
-      const errText = await createRes.text();
-      return res.status(500).json({ error: `Replicate error ${createRes.status}: ${errText.slice(0, 200)}` });
+      return res.status(500).json({ error: data.detail || data.error || `Replicate error ${createRes.status}` });
     }
 
-    let prediction = await createRes.json();
-    let attempts = 0;
+    return res.status(200).json({ status: data.status, predictionId: data.id });
 
-    // Step 2 — poll until done
-    while (
-      prediction.status !== "succeeded" &&
-      prediction.status !== "failed" &&
-      prediction.status !== "canceled" &&
-      attempts < 60
-    ) {
-      await new Promise(r => setTimeout(r, 4000));
-      const poll = await fetch(
-        `https://api.replicate.com/v1/predictions/${prediction.id}`,
-        { headers: { Authorization: `Bearer ${TOKEN}` } }
-      );
-      prediction = await poll.json();
-      attempts++;
-    }
-
-    if (prediction.status !== "succeeded" || !prediction.output) {
-      return res.status(500).json({ error: "Generation failed: " + (prediction.error || "no output returned") });
-    }
-
-    // Step 3 — download audio and return as base64
-    const audioRes = await fetch(prediction.output);
-    if (!audioRes.ok) {
-      return res.status(500).json({ error: "Failed to download generated audio" });
-    }
-    const audioBuffer = await
+  } catch (e) {
+    return res.status(500).json({ error: "Server error: " + e.message });
+  }
+}
